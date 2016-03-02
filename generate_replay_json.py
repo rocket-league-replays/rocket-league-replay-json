@@ -8,8 +8,17 @@ from pyrope import Replay
 
 class Generator(object):
 
-    def __init__(self):
-        file_path = sys.argv[1]
+    actor_metadata = {}
+    goal_metadata = {}
+    match_metadata = {}
+    actors = {}
+    frame_data = []
+
+    def __init__(self, file_path=None):
+        if not file_path:
+            file_path = sys.argv[1]
+
+        print(file_path)
 
         try:
             self.replay = pickle.load(open(file_path + '.pickle', "rb"))
@@ -21,11 +30,17 @@ class Generator(object):
 
             pickle.dump(self.replay, open(file_path + '.pickle', 'wb'))
 
-        self.players = self.get_players()
+        # Extract the goal information.
+        if 'Goals' in self.replay.header:
+            for goal in self.replay.header['Goals']:
+                self.extract_goal_data(goal['frame'])
 
-        for player in self.players:
+        self.get_match_metadata()
+        self.get_actors()
+
+        for player in self.actors:
             # Get their position data.
-            self.players[player]['position_data'] = self.get_player_position_data(player)
+            self.actors[player]['position_data'] = self.get_player_position_data(player)
 
         # Restructure the data so that it's chunkable.
         frame_data = []
@@ -36,8 +51,8 @@ class Generator(object):
                 'actors': []
             }
 
-            for player in self.players:
-                position_data = self.players[player]['position_data']
+            for player in self.actors:
+                position_data = self.actors[player]['position_data']
 
                 if frame in position_data:
                     frame_dict['actors'].append({
@@ -52,12 +67,63 @@ class Generator(object):
             self.replay.header['NumFrames'] - len(frame_data)
         )
 
-        json.dump(frame_data, open(file_path + '.json', 'w'), indent=2)
+        self.frame_data = frame_data
 
-    def get_players(self):
-        players = {}
+        pprint(self.goal_metadata)
+        pprint(self.actor_metadata)
 
+        # exit()
+
+        # json.dump(frame_data, open(file_path + '.json', 'w'), indent=2)
+
+    def get_match_metadata(self):
+        # Search through the frames looking for some game replication info.
         for index, frame in self.replay.netstream.items():
+            game_info = [
+                value for name, value in frame.actors.items()
+                if (
+                    'GameReplicationInfoArchetype' in name and
+                    'Engine.GameReplicationInfo:ServerName' in value['data']
+                )
+            ]
+
+            if not game_info:
+                continue
+
+            game_info = game_info[0]['data']
+
+            self.match_metadata = {
+                'server_name': game_info['Engine.GameReplicationInfo:ServerName'],
+                'playlist': game_info['ProjectX.GRI_X:ReplicatedGamePlaylist']
+            }
+
+            break
+
+    def extract_goal_data(self, base_index, search_index=None):
+        if not search_index:
+            search_index = base_index
+
+        frame = self.replay.netstream[search_index]
+
+        scorer = None
+
+        pri_ta = [value for name, value in frame.actors.items() if 'e_Default__PRI_TA' in name]
+
+        # Figure out who scored.
+        for value in pri_ta:
+            if 'TAGame.PRI_TA:MatchGoals' in value['data']:
+                scorer = value['actor_id']
+                break
+
+        if not scorer:
+            self.extract_goal_data(base_index, search_index - 1)
+            return
+
+        self.goal_metadata[base_index] = scorer
+
+    def get_actors(self):
+        for index, frame in self.replay.netstream.items():
+            # Find the player actor objects.
             pri_ta = [value for name, value in frame.actors.items() if 'e_Default__PRI_TA' in name]
 
             for value in pri_ta:
@@ -92,39 +158,41 @@ class Generator(object):
                 if 'Engine.PlayerReplicationInfo:PlayerName' not in value['data']:
                     continue
 
-                print(value)
-
                 team_id = None
                 actor_id = value['actor_id']
 
                 if 'Engine.PlayerReplicationInfo:Team' in value['data']:
                     team_id = value['data']['Engine.PlayerReplicationInfo:Team'][1]
 
-                player_name = value['data']['Engine.PlayerReplicationInfo:PlayerName']
-
-                if actor_id in players:
-                    if (not players[actor_id]['team'] and team_id) or team_id == -1:
-                        players[actor_id]['team'] = team_id
+                if actor_id in self.actors:
+                    if (not self.actors[actor_id]['team'] and team_id) or team_id == -1:
+                        self.actors[actor_id]['team'] = team_id
 
                 elif 'TAGame.PRI_TA:ClientLoadout' in value['data']:
-                    players[actor_id] = {
+                    player_name = value['data']['Engine.PlayerReplicationInfo:PlayerName']
+
+                    self.actors[actor_id] = {
                         'join': index,
                         'left': self.replay.header['NumFrames'],
                         'name': player_name,
                         'team': team_id,
                     }
 
-        return players
+                    if actor_id not in self.actor_metadata:
+                        self.actor_metadata[actor_id] = value['data']
 
     def get_player_position_data(self, player_id):
-        player = self.players[player_id]
+        player = self.actors[player_id]
         result = {}
 
         car_actor_obj = None
 
         for index in range(player['join'], player['left']):
-            frame = self.replay.netstream[index]
-            # pprint(frame.actors)
+            try:
+                frame = self.replay.netstream[index]
+            except KeyError:
+                # Handle truncated network data.
+                break
 
             # First we need to find the player's car object.
             for actor in frame.actors:
@@ -161,4 +229,5 @@ class Generator(object):
 
 
 if __name__ == '__main__':
-    Generator()
+    for replay_file in sys.argv[1:]:
+        Generator(replay_file)
