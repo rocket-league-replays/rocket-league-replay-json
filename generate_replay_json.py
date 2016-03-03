@@ -69,7 +69,9 @@ class Generator(object):
 
         self.frame_data = frame_data
 
+        print('Goal metadata')
         pprint(self.goal_metadata)
+        print('Actor metadata')
         pprint(self.actor_metadata)
 
         # exit()
@@ -107,7 +109,7 @@ class Generator(object):
 
         scorer = None
 
-        pri_ta = [value for name, value in frame.actors.items() if 'e_Default__PRI_TA' in name]
+        pri_ta = [value for name, value in frame.actors.items() if value['actor_type'] == 'TAGame.Default__PRI_TA']
 
         # Figure out who scored.
         for value in pri_ta:
@@ -124,9 +126,9 @@ class Generator(object):
     def get_actors(self):
         for index, frame in self.replay.netstream.items():
             # Find the player actor objects.
-            pri_ta = [value for name, value in frame.actors.items() if 'e_Default__PRI_TA' in name]
+            players = [value for name, value in frame.actors.items() if value['actor_type'] == 'TAGame.Default__PRI_TA']
 
-            for value in pri_ta:
+            for value in players:
                 """
                 Example `value`:
 
@@ -172,6 +174,7 @@ class Generator(object):
                     player_name = value['data']['Engine.PlayerReplicationInfo:PlayerName']
 
                     self.actors[actor_id] = {
+                        'type': 'player',
                         'join': index,
                         'left': self.replay.header['NumFrames'],
                         'name': player_name,
@@ -181,50 +184,101 @@ class Generator(object):
                     if actor_id not in self.actor_metadata:
                         self.actor_metadata[actor_id] = value['data']
 
+            # Get the ball data (if any).
+            ball = [
+                value
+                for name, value in frame.actors.items()
+                if (
+                    value['actor_type'] == 'Archetypes.Ball.Ball_Default' and
+                    'TAGame.RBActor_TA:ReplicatedRBState' in value.get('data', {})
+                )
+            ]
+
+            if ball:
+                ball = ball[0]
+
+                if ball['actor_id'] not in self.actors and 'TAGame.RBActor_TA:ReplicatedRBState' in ball['data']:
+                    self.actors[ball['actor_id']] = {
+                        'type': 'ball'
+                    }
+
     def get_player_position_data(self, player_id):
         player = self.actors[player_id]
         result = {}
 
         car_actor_obj = None
 
-        for index in range(player['join'], player['left']):
-            try:
-                frame = self.replay.netstream[index]
-            except KeyError:
-                # Handle truncated network data.
-                break
+        if player['type'] == 'player':
+            for index in range(player['join'], player['left']):
+                try:
+                    frame = self.replay.netstream[index]
+                except KeyError:
+                    # Handle truncated network data.
+                    break
 
-            # First we need to find the player's car object.
-            for actor in frame.actors:
-                actor_obj = frame.actors[actor]
+                # First we need to find the player's car object.
+                for actor in frame.actors:
+                    actor_obj = frame.actors[actor]
 
-                if 'data' not in actor_obj:
-                    continue
+                    if 'data' not in actor_obj:
+                        continue
 
-                engine = actor_obj['data'].get('Engine.Pawn:PlayerReplicationInfo')
+                    engine = actor_obj['data'].get('Engine.Pawn:PlayerReplicationInfo')
 
-                # This is the correct object for this player.
-                if engine and engine[1] == player_id:
-                    car_actor_obj = actor_obj['actor_id']
+                    # This is the correct object for this player.
+                    if engine and engine[1] == player_id:
+                        car_actor_obj = actor_obj['actor_id']
 
-                # If the actor we're looking at is the car object, then get the
-                # position and rotation data for this frame.
-                if actor_obj['actor_id'] == car_actor_obj:
-                    state_data = actor_obj['data'].get('TAGame.RBActor_TA:ReplicatedRBState')
+                    # If the actor we're looking at is the car object, then get the
+                    # position and rotation data for this frame.
+                    if actor_obj['actor_id'] == car_actor_obj:
+                        state_data = actor_obj['data'].get('TAGame.RBActor_TA:ReplicatedRBState')
 
-                    if state_data:
-                        x, y, z = state_data['pos']
-                        yaw, pitch, roll = state_data['rot']
+                        if state_data:
+                            x, y, z = state_data['pos']
+                            yaw, pitch, roll = state_data['rot']
 
-                        result[index] = {
-                            'x': x,
-                            'y': y,
-                            'z': z,
-                            'pitch': pitch,
-                            'roll': roll,
-                            'yaw': yaw
-                        }
+                            result[index] = {
+                                'x': x,
+                                'y': y,
+                                'z': z,
+                                'pitch': pitch,
+                                'roll': roll,
+                                'yaw': yaw
+                            }
 
+        elif player['type'] == 'ball':
+            for index, frame in self.replay.netstream.items():
+                # Does this actor exist in the frame data?
+                for actor in frame.actors:
+                    actor_obj = frame.actors[actor]
+
+                    if 'data' not in actor_obj:
+                        continue
+
+                    if actor_obj['actor_id'] != player_id:
+                        continue
+
+                    if 'TAGame.RBActor_TA:ReplicatedRBState' not in actor_obj['data']:
+                        continue
+
+                    state_data = actor_obj['data']['TAGame.RBActor_TA:ReplicatedRBState']
+
+                    x, y, z = state_data['pos']
+                    yaw, pitch, roll = state_data['rot']
+
+                    result[index] = {
+                        'x': x,
+                        'y': y,
+                        'z': z,
+                        'pitch': pitch,
+                        'roll': roll,
+                        'yaw': yaw
+                    }
+
+        if player['type'] == 'ball':
+            print('result')
+            pprint(result)
         return result
 
 
