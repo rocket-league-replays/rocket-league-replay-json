@@ -38,9 +38,24 @@ class Generator(object):
         self.get_match_metadata()
         self.get_actors()
 
-        for player in self.actors:
+        for player in self.actors.copy():
             # Get their position data.
-            self.actors[player]['position_data'] = self.get_player_position_data(player)
+            if self.actors[player]['type'] == 'player':
+                self.actors[player]['position_data'] = self.get_player_position_data(player)
+            elif self.actors[player]['type'] == 'ball':
+                if 'ball' not in self.actors:
+                    self.actors['ball'] = {
+                        'position_data': {}
+                    }
+
+                ball_data = self.get_player_position_data(player)
+
+                self.actors['ball']['position_data'] = {
+                    **self.actors['ball']['position_data'],
+                    **ball_data
+                }
+
+                del self.actors[player]
 
         # Restructure the data so that it's chunkable.
         frame_data = []
@@ -69,6 +84,8 @@ class Generator(object):
 
         self.frame_data = frame_data
 
+        print('Actors')
+        pprint(self.actors)
         print('Goal metadata')
         pprint(self.goal_metadata)
         print('Actor metadata')
@@ -109,10 +126,10 @@ class Generator(object):
 
         scorer = None
 
-        pri_ta = [value for name, value in frame.actors.items() if value['actor_type'] == 'TAGame.Default__PRI_TA']
+        players = [value for name, value in frame.actors.items() if value['actor_type'] == 'TAGame.Default__PRI_TA']
 
         # Figure out who scored.
-        for value in pri_ta:
+        for value in players:
             if 'TAGame.PRI_TA:MatchGoals' in value['data']:
                 scorer = value['actor_id']
                 break
@@ -276,9 +293,6 @@ class Generator(object):
                         'yaw': yaw
                     }
 
-        if player['type'] == 'ball':
-            print('result')
-            pprint(result)
         return result
 
 
