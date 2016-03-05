@@ -12,13 +12,10 @@ class Generator(object):
     goal_metadata = {}
     match_metadata = {}
     actors = {}
-    frame_data = []
 
     def __init__(self, file_path=None):
         if not file_path:
             file_path = sys.argv[1]
-
-        print(file_path)
 
         try:
             self.replay = pickle.load(open(file_path + '.pickle', "rb"))
@@ -57,43 +54,16 @@ class Generator(object):
 
                 del self.actors[player]
 
-        # Restructure the data so that it's chunkable.
-        frame_data = []
+        collated_data = {
+            'actors': self.actors,
+            'goal_metadata': self.goal_metadata,
+            'actor_metadata': self.actor_metadata,
+            'match_metadata': self.match_metadata,
+        }
 
-        for frame in range(self.replay.header['NumFrames']):
-            frame_dict = {
-                'time': self.replay.netstream[frame].current,
-                'actors': []
-            }
+        self.json = json.dumps(collated_data, indent=2)
 
-            for player in self.actors:
-                position_data = self.actors[player]['position_data']
-
-                if frame in position_data:
-                    frame_dict['actors'].append({
-                        'id': player,
-                        'type': 'car',
-                        **position_data[frame]
-                    })
-
-            frame_data.append(frame_dict)
-
-        assert len(frame_data) == self.replay.header['NumFrames'], "Missing {} frames from data output.".format(
-            self.replay.header['NumFrames'] - len(frame_data)
-        )
-
-        self.frame_data = frame_data
-
-        print('Actors')
-        pprint(self.actors)
-        print('Goal metadata')
-        pprint(self.goal_metadata)
-        print('Actor metadata')
-        pprint(self.actor_metadata)
-
-        # exit()
-
-        # json.dump(frame_data, open(file_path + '.json', 'w'), indent=2)
+        print(self.json)
 
     def get_match_metadata(self):
         # Search through the frames looking for some game replication info.
