@@ -32,7 +32,6 @@ class Generator(object):
             for goal in self.replay.header['Goals']:
                 self.extract_goal_data(goal['frame'])
 
-        self.get_match_metadata()
         self.get_actors()
 
         for player in self.actors.copy():
@@ -63,30 +62,25 @@ class Generator(object):
 
         self.json = json.dumps(collated_data, indent=2)
 
-        print(self.json)
-
-    def get_match_metadata(self):
+    def get_match_metadata(self, frame):
         # Search through the frames looking for some game replication info.
-        for index, frame in self.replay.netstream.items():
-            game_info = [
-                value for name, value in frame.actors.items()
-                if (
-                    'GameReplicationInfoArchetype' in name and
-                    'Engine.GameReplicationInfo:ServerName' in value['data']
-                )
-            ]
+        game_info = [
+            value for name, value in frame.actors.items()
+            if (
+                'GameReplicationInfoArchetype' in name and
+                'Engine.GameReplicationInfo:ServerName' in value['data']
+            )
+        ]
 
-            if not game_info:
-                continue
+        if not game_info:
+            return
 
-            game_info = game_info[0]['data']
+        game_info = game_info[0]['data']
 
-            self.match_metadata = {
-                'server_name': game_info['Engine.GameReplicationInfo:ServerName'],
-                'playlist': game_info['ProjectX.GRI_X:ReplicatedGamePlaylist']
-            }
-
-            break
+        self.match_metadata = {
+            'server_name': game_info['Engine.GameReplicationInfo:ServerName'],
+            'playlist': game_info['ProjectX.GRI_X:ReplicatedGamePlaylist']
+        }
 
     def extract_goal_data(self, base_index, search_index=None):
         if not search_index:
@@ -112,6 +106,11 @@ class Generator(object):
 
     def get_actors(self):
         for index, frame in self.replay.netstream.items():
+            # We can attempt to get the match metadata during this loop and
+            # save us having to loop the netstream more than once.
+            if not self.match_metadata:
+                self.get_match_metadata(frame)
+
             # Find the player actor objects.
             players = [value for name, value in frame.actors.items() if value['actor_type'] == 'TAGame.Default__PRI_TA']
 
