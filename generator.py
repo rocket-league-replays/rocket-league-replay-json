@@ -90,7 +90,11 @@ class Generator(object):
 
         scorer = None
 
-        players = [value for name, value in frame.actors.items() if value['actor_type'] == 'TAGame.Default__PRI_TA']
+        players = [
+            value
+            for name, value in frame.actors.items()
+            if value['actor_type'] == 'TAGame.Default__PRI_TA'
+        ]
 
         # Figure out who scored.
         for value in players:
@@ -112,7 +116,11 @@ class Generator(object):
                 self.get_match_metadata(frame)
 
             # Find the player actor objects.
-            players = [value for name, value in frame.actors.items() if value['actor_type'] == 'TAGame.Default__PRI_TA']
+            players = [
+                value
+                for name, value in frame.actors.items()
+                if value['actor_type'] == 'TAGame.Default__PRI_TA'
+            ]
 
             for value in players:
                 """
